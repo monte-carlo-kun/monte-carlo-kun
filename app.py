@@ -16,7 +16,6 @@ ALL_NPB_TEAMS = [
 
 HANDICAP_OPTIONS = ["0.3", "0.5", "0.7", "1", "1.3", "1.5", "1.7", "1半", "1半3", "1半5", "1半7", "2"]
 
-# 試合が取得できなかった場合の自然なデフォルトカード
 DEFAULT_MATCHUPS = [
     ("読売ジャイアンツ", "阪神タイガース"),
     ("横浜DeNAベイスターズ", "東京ヤクルトスワローズ"),
@@ -50,7 +49,7 @@ date_jp_str = target_date.strftime("%Y年%m月%d日")
 
 today_games, auto_starters = fetch_schedule_and_starters(date_str)
 if not today_games:
-    st.warning(f"⚠️ {date_jp_str} の試合情報がWeb上で確認できませんでした。手動で対戦カードと予想先発を設定してください。")
+    st.warning(f"⚠️ {date_jp_str} の試合情報がWeb上で確認できませんでした。手動で対戦カードを設定してください。")
 
 st.markdown("---")
 st.subheader(f"⚙️ NPBカード 一括設定 ({date_jp_str})")
@@ -62,7 +61,6 @@ games_input = []
 for i in range(int(num_games)):
     st.markdown(f"**第 {i+1} 試合**")
     
-    # 取得できれば実際のカード、できなければ自然なカードをセット
     def_home = today_games[i][0] if i < len(today_games) else DEFAULT_MATCHUPS[i % 6][0]
     def_away = today_games[i][1] if i < len(today_games) else DEFAULT_MATCHUPS[i % 6][1]
 
@@ -75,13 +73,12 @@ for i in range(int(num_games)):
     with g_col3: h_handi = st.selectbox(f"ハンデ #{i+1}", HANDICAP_OPTIONS, index=3, key=f"bulk_handi_{i}")
     with g_col4: a_team = st.selectbox(f"ビジター #{i+1}", ALL_NPB_TEAMS, index=default_away_idx, key=f"bulk_a_{i}")
     
-    # ★新機能: 先発投手の自由入力枠（自動取得できれば初期値が入る）
+    # 手動防御率枠を削除し、洗練されたUIに戻す
     p_col1, p_col2 = st.columns(2)
     auto_h_pitcher = auto_starters.get(h_team, {}).get("name", "未定")
     auto_a_pitcher = auto_starters.get(a_team, {}).get("name", "未定")
-    
-    with p_col1: h_pitcher = st.text_input(f"⚾ {h_team}の先発 (手動編集可)", value=auto_h_pitcher, key=f"pitcher_h_{i}")
-    with p_col2: a_pitcher = st.text_input(f"⚾ {a_team}の先発 (手動編集可)", value=auto_a_pitcher, key=f"pitcher_a_{i}")
+    with p_col1: h_pitcher = st.text_input(f"⚾ {h_team}の先発", value=auto_h_pitcher, key=f"pitcher_h_{i}")
+    with p_col2: a_pitcher = st.text_input(f"⚾ {a_team}の先発", value=auto_a_pitcher, key=f"pitcher_a_{i}")
     
     act_h = h_handi if g_side == "ホーム出し" else f"-{h_handi}"
     games_input.append((h_team, act_h, a_team, g_side, h_handi, h_pitcher, a_pitcher))
@@ -93,6 +90,8 @@ if st.button("🔥 全試合一括AI解析 ＆ note記事生成", use_container_
     progress_bar = st.progress(0)
     for idx, (h_team, act_h, a_team, g_side, raw_h, h_pitcher, a_pitcher) in enumerate(games_input):
         with st.spinner(f"「{h_pitcher}」「{a_pitcher}」の最新成績を検索し、10万回シミュレーション中..."):
+            
+            # 手動入力なしの通常フローへ戻す
             h_exp, a_exp, details = calculate_expected_score(h_team, a_team, h_pitcher, a_pitcher)
             h_prob, p_prob, a_prob, _ = run_monte_carlo(h_exp, a_exp, act_h)
             
