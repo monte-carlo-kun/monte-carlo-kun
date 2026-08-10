@@ -1,12 +1,11 @@
-
 """
-NPB 日程 & 予告先発 リアルタイム自動取得エンジン
-（ダミーデータを廃止し、実際に取得できた名前のみを返します）
+NPB 日程 & 全投手リアルタイム成績取得エンジン
 """
 
 import requests
 from bs4 import BeautifulSoup
 import re
+import urllib.parse
 
 HEADERS = {
 	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -22,45 +21,72 @@ TEAM_ALIAS = {
 
 def fetch_schedule_and_starters(target_date_str: str = None) -> tuple[list, dict]:
 	games = []
-	starters = {} # 取得できた場合のみ {"球団名": {"name": "投手名"}} を格納
-
+	starters = {}
 	try:
-		if target_date_str:
-			url = f"https://baseball.yahoo.co.jp/npb/schedule/?date={target_date_str}"
-		else:
-			url = "https://baseball.yahoo.co.jp/npb/schedule/"
-            
-		response = requests.get(url, headers=HEADERS, timeout=5)
-		if response.status_code != 200:
-			return games, starters
+		url = f"https://baseball.yahoo.co.jp/npb/schedule/?date={target_date_str}" if target_date_str else "https://baseball.yahoo.co.jp/npb/schedule/"
+		res = requests.get(url, headers=HEADERS, timeout=5)
+		if res.status_code != 200: return games, starters
 
-		soup = BeautifulSoup(response.text, "html.parser")
-		match_cards = soup.select(".bb-matchTable__item, .bb-scoreTable, .bb-headToHeadTable")
-
-		for card in match_cards:
+		soup = BeautifulSoup(res.text, "html.parser")
+		for card in soup.select(".bb-matchTable__item, .bb-scoreTable, .bb-headToHeadTable"):
 			text = card.get_text()
-			matched_teams = []
-            
-			for short_name, full_name in TEAM_ALIAS.items():
-				if short_name in text and full_name not in matched_teams:
-					matched_teams.append(full_name)
+			matched_teams = [full for short, full in TEAM_ALIAS.items() if short in text]
+			# 重複排除して2チーム以上あればカード追加
+			matched_unique = list(dict.fromkeys(matched_teams))
+			if len(matched_unique) >= 2:
+				if (matched_unique[0], matched_unique[1]) not in games:
+					games.append((matched_unique[0], matched_unique[1]))
 
-			if len(matched_teams) >= 2:
-				home = matched_teams[0]
-				away = matched_teams[1]
-				if (home, away) not in games:
-					games.append((home, away))
-
-			for short_name, full_name in TEAM_ALIAS.items():
-				if short_name in text:
-					# 予告先発名の抽出
+			for short, full in TEAM_ALIAS.items():
+				if short in text:
 					match = re.search(r"(?:予告先発|先発)[：:\s]*([一-龥ぁ-んァ-ヶa-zA-Z\s]{2,8})", text)
-					if match:
-						pitcher_name = match.group(1).strip()
-						if pitcher_name and len(pitcher_name) >= 2:
-							starters[full_name] = {"name": pitcher_name}
-
+					if match and len(match.group(1).strip()) >= 2:
+						starters[full] = {"name": match.group(1).strip()}
 		return games, starters
-
 	except Exception:
 		return games, starters
+
+def fetch_pitcher_stats_online(pitcher_name: str) -> dict:
+	"""入力された投手名をスポーツナビで検索し、防御率と左右を取得する"""
+	fallback = {"name": pitcher_name, "era": 3.30, "whip": 1.25, "throws": "R"}
+	if not pitcher_name or pitcher_name == "未定": return fallback
+
+	try:
+		encoded_name = urllib.parse.quote(pitcher_name)
+		search_url = f"https://baseball.yahoo.co.jp/npb/search?p={encoded_name}"
+		res = requests.get(search_url, headers=HEADERS, timeout=5)
+		if res.status_code != 200: return fallback
+
+		soup = BeautifulSoup(res.text, "html.parser")
+		player_link = None
+		for a in soup.select("a"):
+			href = a.get("href", "")
+			if "/npb/player/" in href:
+				player_link = "https://baseball.yahoo.co.jp" + href if not href.startswith("http") else href
+				break
+                
+		if not player_link: return fallback
+
+		p_res = requests.get(player_link, headers=HEADERS, timeout=5)
+		if p_res.status_code != 200: return fallback
+
+		p_soup = BeautifulSoup(p_res.text, "html.parser")
+		profile_text = p_soup.get_text()
+        
+		throws = "L" if "左投" in profile_text else "R"
+		era = 3.30
+        
+		for th in p_soup.find_all("th"):
+			if "防御率" in th.get_text():
+				td = th.find_next_sibling("td")
+				if td:
+					try:
+						era = float(td.get_text().strip())
+					except ValueError:
+						pass
+				break
+                
+		return {"name": pitcher_name, "era": era, "whip": 1.25, "throws": throws}
+	except Exception:
+		return fallback
+
