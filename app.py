@@ -31,10 +31,9 @@ def get_calibrated_star_rating(prob: float) -> str:
 st.set_page_config(
     page_title="⚾ MONTE CARLO KUN | NPB AI ANALYTICS",
     page_icon="⚾",
-    layout="centered"
+    layout="wide"
 )
 
-# ログイン認証
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
@@ -49,7 +48,6 @@ if not st.session_state["authenticated"]:
             st.error("パスワードが正しくありません")
     st.stop()
 
-# --- ログイン後のダッシュボード ---
 st.title("⚾ MONTE CARLO KUN")
 st.caption("NPB AI ANALYTICS — 10万回シミュレーション型 ハンデ解析ダッシュボード")
 
@@ -58,18 +56,22 @@ st.markdown("---")
 
 if mode == "1試合ごとの個別分析":
     st.subheader("⚙️ 単発試合分析")
-    col1, col2, col3 = st.columns([2, 1, 2])
+    col1, col2, col3, col4 = st.columns([2, 1.5, 1, 2])
     with col1:
         home_team = st.selectbox("ホームチーム", ALL_NPB_TEAMS, index=0, key="single_home")
     with col2:
-        handicap = st.selectbox("ハンデ（出し）", HANDICAP_OPTIONS, index=3, key="single_handi")
+        give_side = st.selectbox("出し側", ["ホーム出し", "ビジター出し"], key="single_give")
     with col3:
+        handicap = st.selectbox("ハンデ", HANDICAP_OPTIONS, index=3, key="single_handi")
+    with col4:
         away_team = st.selectbox("ビジターチーム", ALL_NPB_TEAMS, index=6, key="single_away")
+
+    actual_handicap = handicap if give_side == "ホーム出し" else f"-{handicap}"
 
     if st.button("🚀 AI分析実行", use_container_width=True, type="primary"):
         home_exp, away_exp, details = calculate_expected_score(home_team, away_team)
         with st.spinner("100,000試合のシミュレーションを実行中..."):
-            home_prob, push_prob, away_prob, fig = run_monte_carlo(home_exp, away_exp, handicap)
+            home_prob, push_prob, away_prob, fig = run_monte_carlo(home_exp, away_exp, actual_handicap)
         
         home_stars = get_calibrated_star_rating(home_prob)
         away_stars = get_calibrated_star_rating(away_prob)
@@ -77,20 +79,20 @@ if mode == "1試合ごとの個別分析":
         st.subheader("📊 ハンデ込みAI分析結果")
         res_col1, res_col2, res_col3 = st.columns(3)
         with res_col1:
-            st.metric(label=f"{home_team}（出し）", value=f"{home_prob}%", delta=home_stars)
+            st.metric(label=f"{home_team}（{'出し' if give_side == 'ホーム出し' else '貰い'}）", value=f"{home_prob}%", delta=home_stars)
         with res_col2:
             st.metric(label="勝負なし", value=f"{push_prob}%")
         with res_col3:
-            st.metric(label=f"{away_team}", value=f"{away_prob}%", delta=away_stars)
+            st.metric(label=f"{away_team}（{'貰い' if give_side == 'ホーム出し' else '出し'}）", value=f"{away_prob}%", delta=away_stars)
 
         st.plotly_chart(fig, use_container_width=True)
 
         note_text = generate_note_report(
-            home_team, away_team, handicap,
+            home_team, away_team, actual_handicap,
             home_prob, push_prob, away_prob,
             home_stars, away_stars, home_exp, away_exp, details
         )
-        sns_text = generate_sns_post(home_team, away_team, handicap, home_prob, push_prob, away_prob, home_stars, away_stars)
+        sns_text = generate_sns_post(home_team, away_team, actual_handicap, home_prob, push_prob, away_prob, home_stars, away_stars)
 
         tab1, tab2 = st.tabs(["📄 note用分析レポート", "📱 X / Threads用投稿文"])
         with tab1:
@@ -100,36 +102,40 @@ if mode == "1試合ごとの個別分析":
 
 else:
     st.subheader("⚙️ 本日のNPBカード 一括設定（最大6試合）")
-    st.caption("カードを選択し、1時間前に確定したハンデを入力して「一括解析」を押してください。")
+    st.caption("対戦カードと「どちらが出しているか」を指定して「一括解析」を押してください。")
 
     num_games = st.number_input("本日の試合数", min_value=1, max_value=6, value=6, step=1)
     
     games_input = []
     for i in range(int(num_games)):
         st.markdown(f"**第 {i+1} 試合**")
-        g_col1, g_col2, g_col3 = st.columns([2, 1, 2])
+        g_col1, g_col2, g_col3, g_col4 = st.columns([2, 1.5, 1, 2])
         with g_col1:
             h_team = st.selectbox(f"ホーム #{i+1}", ALL_NPB_TEAMS, index=i % 12, key=f"bulk_h_{i}")
         with g_col2:
-            h_handi = st.selectbox(f"ハンデ #{i+1}", HANDICAP_OPTIONS, index=3, key=f"bulk_handi_{i}")
+            g_side = st.selectbox(f"出し側 #{i+1}", ["ホーム出し", "ビジター出し"], key=f"bulk_give_{i}")
         with g_col3:
+            h_handi = st.selectbox(f"ハンデ #{i+1}", HANDICAP_OPTIONS, index=3, key=f"bulk_handi_{i}")
+        with g_col4:
             a_team = st.selectbox(f"ビジター #{i+1}", ALL_NPB_TEAMS, index=(i + 6) % 12, key=f"bulk_a_{i}")
-        games_input.append((h_team, h_handi, a_team))
+        
+        act_h = h_handi if g_side == "ホーム出し" else f"-{h_handi}"
+        games_input.append((h_team, act_h, a_team, g_side, h_handi))
 
     if st.button("🔥 全試合一括AI解析 ＆ note記事生成", use_container_width=True, type="primary"):
         all_results = []
         star3_or_more = []
         
         progress_bar = st.progress(0)
-        for idx, (h_team, h_handi, a_team) in enumerate(games_input):
+        for idx, (h_team, act_h, a_team, g_side, raw_h) in enumerate(games_input):
             h_exp, a_exp, details = calculate_expected_score(h_team, a_team)
-            h_prob, p_prob, a_prob, _ = run_monte_carlo(h_exp, a_exp, h_handi)
+            h_prob, p_prob, a_prob, _ = run_monte_carlo(h_exp, a_exp, act_h)
             
             h_stars = get_calibrated_star_rating(h_prob)
             a_stars = get_calibrated_star_rating(a_prob)
             
             res_item = {
-                "home": h_team, "away": a_team, "handicap": h_handi,
+                "home": h_team, "away": a_team, "act_handicap": act_h, "g_side": g_side, "raw_h": raw_h,
                 "home_prob": h_prob, "push_prob": p_prob, "away_prob": a_prob,
                 "home_stars": h_stars, "away_stars": a_stars,
                 "home_exp": h_exp, "away_exp": a_exp, "details": details
@@ -144,25 +150,30 @@ else:
         st.success("✅ 全試合の解析が完了しました！")
         st.markdown("---")
 
-        # メンバーシップ用（全試合フルレポート）の組み立て
+        # メンバーシップ用テキストの作成
         bulk_note_text = "【本日のNPB全試合 AIハンデ解析・モンテカルロ予想】\n\n"
         bulk_note_text += "10万回のモンテカルロシミュレーションによる本日全試合の勝率・期待得点解析です。\n\n"
         
         for res in all_results:
             bulk_note_text += f"━━━━━━━━━━━━━━━━━━━━\n"
-            bulk_note_text += f"⚾ {res['home']} (ハンデ: {res['handicap']}出し) vs {res['away']}\n"
+            bulk_note_text += f"⚾ {res['home']} vs {res['away']} (ハンデ: {res['g_side']} {res['raw_h']})\n"
             bulk_note_text += f"・{res['home']}側勝率: {res['home_prob']}% [{res['home_stars']}]\n"
             bulk_note_text += f"・{res['away']}側勝率: {res['away_prob']}% [{res['away_stars']}]\n"
             bulk_note_text += f"・勝負なし (Push): {res['push_prob']}%\n"
             bulk_note_text += f"・予測スコア: {res['home']} {res['home_exp']} - {res['away_exp']} {res['away']}\n\n"
 
-        # 星3以上単発有料記事用の組み立て
+        # 星3以上限定テキストの作成
         star3_note_text = "【本日の厳選おすすめ予想（星3以上対象カード）】\n\n"
-        if star3_note_text:
+        if star3_or_more:
             for res in star3_or_more:
+                best_side = res['home'] if res['home_prob'] > res['away_prob'] else res['away']
+                best_prob = max(res['home_prob'], res['away_prob'])
+                best_stars = res['home_stars'] if res['home_prob'] > res['away_prob'] else res['away_stars']
+                
                 star3_note_text += f"🔥 厳選カード: {res['home']} vs {res['away']}\n"
-                star3_note_text += f"・推奨サイド: {res['home'] if res['home_prob'] > res['away_prob'] else res['away']}\n"
-                star3_note_text += f"・分析勝率: {max(res['home_prob'], res['away_prob'])}%\n\n"
+                star3_note_text += f"・ハンデ設定: {res['g_side']} {res['raw_h']}\n"
+                star3_note_text += f"・推奨サイド: {best_side} ({best_stars})\n"
+                star3_note_text += f"・分析勝率: {best_prob}%\n\n"
         else:
             star3_note_text += "本日は星3以上の高信頼度カードはありませんでした。"
 
