@@ -1,6 +1,6 @@
 """
-NPB 予告先発 日付対応自動取得エンジン (Scraper Engine)
-指定日の Yahoo!プロ野球 日程ページからリアルタイムで予告先発を取得。
+NPB 日程 & 予告先発 リアルタイム自動取得エンジン
+指定日の試合カードの有無と予告先発を解析します。
 """
 
 import requests
@@ -34,28 +34,43 @@ FALLBACK_STARTERS = {
     "埼玉西武ライオンズ": {"name": "今井 達也", "era": 2.50, "whip": 1.10, "throws": "R"},
 }
 
-def fetch_today_starters(target_date_str: str = None) -> dict:
-    """指定日（YYYY-MM-DD）のYahoo!プロ野球から予告先発を取得"""
+def fetch_schedule_and_starters(target_date_str: str = None) -> tuple[list, dict]:
+    """
+    指定日の試合カード一覧 [(ホーム, ビジター), ...] と 予告先発辞書 を返す
+    """
     starters = {k: dict(v) for k, v in FALLBACK_STARTERS.items()}
-    
+    games = []
+
     try:
         if target_date_str:
             url = f"https://baseball.yahoo.co.jp/npb/schedule/?date={target_date_str}"
         else:
             url = "https://baseball.yahoo.co.jp/npb/schedule/"
             
-        print(f"🌐 NPB予告先発データの取得を開始: {url}")
         response = requests.get(url, headers=HEADERS, timeout=5)
-        
         if response.status_code != 200:
-            print(f"⚠️ ステータス異常 ({response.status_code}): バックアップデータを採用します。")
-            return starters
+            return games, starters
 
         soup = BeautifulSoup(response.text, "html.parser")
         match_cards = soup.select(".bb-matchTable__item, .bb-scoreTable, .bb-headToHeadTable")
 
         for card in match_cards:
             text = card.get_text()
+            matched_teams = []
+            
+            # カードに含まれる球団を特定
+            for short_name, full_name in TEAM_ALIAS.items():
+                if short_name in text and full_name not in matched_teams:
+                    matched_teams.append(full_name)
+
+            # 対戦カード（2チーム）が検出された場合
+            if len(matched_teams) >= 2:
+                home = matched_teams[0]
+                away = matched_teams[1]
+                if (home, away) not in games:
+                    games.append((home, away))
+
+            # 予告先発名の抽出
             for short_name, full_name in TEAM_ALIAS.items():
                 if short_name in text:
                     match = re.search(r"(?:予告先発|先発)[：:\s]*([一-龥ぁ-んァ-ヶa-zA-Z\s]{2,8})", text)
@@ -64,8 +79,7 @@ def fetch_today_starters(target_date_str: str = None) -> dict:
                         if pitcher_name and len(pitcher_name) >= 2:
                             starters[full_name]["name"] = pitcher_name
 
-        return starters
+        return games, starters
 
-    except Exception as e:
-        print(f"⚠️ 解析エラー ({e}): バックアップデータを採用します。")
-        return starters
+    except Exception:
+        return games, starters
