@@ -1,6 +1,7 @@
+
 """
 NPB 日程 & 予告先発 リアルタイム自動取得エンジン
-指定日の試合カードの有無と予告先発を解析します。
+（ダミーデータを廃止し、実際に取得できた名前のみを返します）
 """
 
 import requests
@@ -19,27 +20,9 @@ TEAM_ALIAS = {
 	"楽天": "東北楽天ゴールデンイーグルス", "西武": "埼玉西武ライオンズ"
 }
 
-FALLBACK_STARTERS = {
-	"阪神タイガース": {"name": "才木 浩人", "era": 1.83, "whip": 1.02, "throws": "R"},
-	"読売ジャイアンツ": {"name": "戸郷 翔征", "era": 2.30, "whip": 1.08, "throws": "R"},
-	"広島東洋カープ": {"name": "床田 寛樹", "era": 2.40, "whip": 1.10, "throws": "L"},
-	"横浜DeNAベイスターズ": {"name": "東 克樹", "era": 2.10, "whip": 1.05, "throws": "L"},
-	"東京ヤクルトスワローズ": {"name": "高橋 奎二", "era": 3.50, "whip": 1.25, "throws": "L"},
-	"中日ドラゴンズ": {"name": "高橋 宏斗", "era": 1.38, "whip": 0.98, "throws": "R"},
-	"福岡ソフトバンクホークス": {"name": "有原 航平", "era": 2.20, "whip": 1.05, "throws": "R"},
-	"北海道日本ハムファイターズ": {"name": "伊藤 大海", "era": 2.60, "whip": 1.12, "throws": "R"},
-	"千葉ロッテマリーンズ": {"name": "小島 和哉", "era": 3.20, "whip": 1.20, "throws": "L"},
-	"オリックス・バファローズ": {"name": "宮城 大弥", "era": 2.30, "whip": 1.06, "throws": "L"},
-	"東北楽天ゴールデンイーグルス": {"name": "早川 隆久", "era": 3.00, "whip": 1.15, "throws": "L"},
-	"埼玉西武ライオンズ": {"name": "今井 達也", "era": 2.50, "whip": 1.10, "throws": "R"},
-}
-
 def fetch_schedule_and_starters(target_date_str: str = None) -> tuple[list, dict]:
-	"""
-	指定日の試合カード一覧 [(ホーム, ビジター), ...] と 予告先発辞書 を返す
-	"""
-	starters = {k: dict(v) for k, v in FALLBACK_STARTERS.items()}
 	games = []
+	starters = {} # 取得できた場合のみ {"球団名": {"name": "投手名"}} を格納
 
 	try:
 		if target_date_str:
@@ -58,33 +41,26 @@ def fetch_schedule_and_starters(target_date_str: str = None) -> tuple[list, dict
 			text = card.get_text()
 			matched_teams = []
             
-			# カードに含まれる球団を特定
 			for short_name, full_name in TEAM_ALIAS.items():
 				if short_name in text and full_name not in matched_teams:
 					matched_teams.append(full_name)
 
-			# 対戦カード（2チーム）が検出された場合
 			if len(matched_teams) >= 2:
 				home = matched_teams[0]
 				away = matched_teams[1]
 				if (home, away) not in games:
 					games.append((home, away))
 
-			# 予告先発名の抽出
 			for short_name, full_name in TEAM_ALIAS.items():
 				if short_name in text:
+					# 予告先発名の抽出
 					match = re.search(r"(?:予告先発|先発)[：:\s]*([一-龥ぁ-んァ-ヶa-zA-Z\s]{2,8})", text)
 					if match:
 						pitcher_name = match.group(1).strip()
 						if pitcher_name and len(pitcher_name) >= 2:
-							starters[full_name]["name"] = pitcher_name
+							starters[full_name] = {"name": pitcher_name}
 
 		return games, starters
 
 	except Exception:
 		return games, starters
-
-if __name__ == "__main__":
-	games, starters = fetch_schedule_and_starters()
-	print("本日のカード:", games)
-
