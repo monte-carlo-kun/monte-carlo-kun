@@ -1,8 +1,8 @@
+import json
+import os
 import requests
 from bs4 import BeautifulSoup
 import re
-import json
-import os
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -17,7 +17,21 @@ TEAM_ALIAS = {
 }
 
 def fetch_schedule_and_starters(target_date_str: str = None) -> tuple[list, dict]:
-    # （試合情報の取得処理は元のまま維持）
+    # ロボットが自動生成したデータベースから一瞬で読み込む
+    db_path = "schedule_db.json"
+    if target_date_str and os.path.exists(db_path):
+        try:
+            with open(db_path, "r", encoding="utf-8") as f:
+                schedule_db = json.load(f)
+            if target_date_str in schedule_db:
+                data = schedule_db[target_date_str]
+                games = [tuple(g) for g in data["games"]]
+                starters = data["starters"]
+                return games, starters
+        except Exception as e:
+            print(f"Schedule DB load error: {e}")
+
+    # 万が一DBがなかった時だけWebを見に行く（フォールバック）
     games = []
     starters = {}
     try:
@@ -44,20 +58,16 @@ def fetch_schedule_and_starters(target_date_str: str = None) -> tuple[list, dict
         return games, starters
 
 def fetch_pitcher_stats_online(pitcher_name: str) -> dict:
-    """自動更新されたJSONデータベースから一瞬で成績を読み込む"""
     fallback = {"name": pitcher_name, "era": 3.30, "whip": 1.25, "throws": "R"}
     if not pitcher_name or pitcher_name == "未定": return fallback
     
     clean_name = pitcher_name.replace(" ", "").replace(" ", "")
     db_path = "pitcher_db.json"
     
-    # JSONファイルが存在するかチェック
     if os.path.exists(db_path):
         try:
             with open(db_path, "r", encoding="utf-8") as f:
                 pitcher_db = json.load(f)
-                
-            # 名前でデータベースを検索
             for key, data in pitcher_db.items():
                 if key in clean_name or clean_name in key:
                     return {
@@ -69,5 +79,4 @@ def fetch_pitcher_stats_online(pitcher_name: str) -> dict:
         except Exception as e:
             print(f"DB load error: {e}")
             
-    # 新人などでDBにいなかった場合の安全策
     return fallback

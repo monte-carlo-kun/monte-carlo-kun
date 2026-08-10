@@ -1,19 +1,16 @@
 name: Daily Pitcher Database Update
 
-# 毎朝5:00 JST (UTCの20:00) に自動実行する設定
 on:
   schedule:
     - cron: '0 20 * * *'
-  workflow_dispatch: # GitHub画面から手動で実行できるボタンも追加
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   update-db:
     runs-on: ubuntu-latest
-
-
-    permissions:
-      contents: write
-      
     
     steps:
       - name: Checkout repository
@@ -25,16 +22,12 @@ jobs:
           python-version: '3.10'
           
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4
+        run: pip install requests beautifulsoup4
           
       - name: Run update script
         run: python update_db.py
         
-      - name: Commit and push if changed
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add pitcher_db.json
-          git commit -m "Auto-update pitcher database ⚾" || echo "No changes to commit"
-          git push
+      - name: Auto Commit and Push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto-update database"
