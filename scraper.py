@@ -1,25 +1,31 @@
 """
-NPB 予告先発 & チームデータ自動取得エンジン (Scraper Engine)
-セ・パ全12球団の予告先発に対応。
+NPB 予告先発 日付対応自動取得エンジン (Scraper Engine)
+指定日の Yahoo!プロ野球 日程ページからリアルタイムで予告先発を取得。
 """
 
 import requests
 from bs4 import BeautifulSoup
+import re
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-# NPB全12球団 バックアップ先発データ
+TEAM_ALIAS = {
+    "阪神": "阪神タイガース", "巨人": "読売ジャイアンツ", "広島": "広島東洋カープ",
+    "DeNA": "横浜DeNAベイスターズ", "ヤクルト": "東京ヤクルトスワローズ", "中日": "中日ドラゴンズ",
+    "ソフトバンク": "福岡ソフトバンクホークス", "日本ハム": "北海道日本ハムファイターズ",
+    "ロッテ": "千葉ロッテマリーンズ", "オリックス": "オリックス・バファローズ",
+    "楽天": "東北楽天ゴールデンイーグルス", "西武": "埼玉西武ライオンズ"
+}
+
 FALLBACK_STARTERS = {
-    # セ・リーグ
     "阪神タイガース": {"name": "才木 浩人", "era": 1.83, "whip": 1.02, "throws": "R"},
     "読売ジャイアンツ": {"name": "戸郷 翔征", "era": 2.30, "whip": 1.08, "throws": "R"},
     "広島東洋カープ": {"name": "床田 寛樹", "era": 2.40, "whip": 1.10, "throws": "L"},
     "横浜DeNAベイスターズ": {"name": "東 克樹", "era": 2.10, "whip": 1.05, "throws": "L"},
     "東京ヤクルトスワローズ": {"name": "高橋 奎二", "era": 3.50, "whip": 1.25, "throws": "L"},
     "中日ドラゴンズ": {"name": "高橋 宏斗", "era": 1.38, "whip": 0.98, "throws": "R"},
-    # パ・リーグ
     "福岡ソフトバンクホークス": {"name": "有原 航平", "era": 2.20, "whip": 1.05, "throws": "R"},
     "北海道日本ハムファイターズ": {"name": "伊藤 大海", "era": 2.60, "whip": 1.12, "throws": "R"},
     "千葉ロッテマリーンズ": {"name": "小島 和哉", "era": 3.20, "whip": 1.20, "throws": "L"},
@@ -28,25 +34,38 @@ FALLBACK_STARTERS = {
     "埼玉西武ライオンズ": {"name": "今井 達也", "era": 2.50, "whip": 1.10, "throws": "R"},
 }
 
-def fetch_today_starters() -> dict:
-    """当日の予告先発情報をWebから取得する関数"""
-    print("🌐 NPB全12球団 予告先発データの自動取得を開始...")
+def fetch_today_starters(target_date_str: str = None) -> dict:
+    """指定日（YYYY-MM-DD）のYahoo!プロ野球から予告先発を取得"""
+    starters = {k: dict(v) for k, v in FALLBACK_STARTERS.items()}
+    
     try:
-        url = "https://baseball.yahoo.co.jp/npb/schedule/"
+        if target_date_str:
+            url = f"https://baseball.yahoo.co.jp/npb/schedule/?date={target_date_str}"
+        else:
+            url = "https://baseball.yahoo.co.jp/npb/schedule/"
+            
+        print(f"🌐 NPB予告先発データの取得を開始: {url}")
         response = requests.get(url, headers=HEADERS, timeout=5)
         
-        if response.status_code == 200:
-            print("✅ 予告先発データの取得に成功しました。")
-            return FALLBACK_STARTERS
-        else:
-            print(f"⚠️ 通信ステータス異常 ({response.status_code}): バックアップデータを採用します。")
-            return FALLBACK_STARTERS
+        if response.status_code != 200:
+            print(f"⚠️ ステータス異常 ({response.status_code}): バックアップデータを採用します。")
+            return starters
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        match_cards = soup.select(".bb-matchTable__item, .bb-scoreTable, .bb-headToHeadTable")
+
+        for card in match_cards:
+            text = card.get_text()
+            for short_name, full_name in TEAM_ALIAS.items():
+                if short_name in text:
+                    match = re.search(r"(?:予告先発|先発)[：:\s]*([一-龥ぁ-んァ-ヶa-zA-Z\s]{2,8})", text)
+                    if match:
+                        pitcher_name = match.group(1).strip()
+                        if pitcher_name and len(pitcher_name) >= 2:
+                            starters[full_name]["name"] = pitcher_name
+
+        return starters
 
     except Exception as e:
-        print(f"⚠️ データ取得エラー ({e}): バックアップデータを採用して処理を継続します。")
-        return FALLBACK_STARTERS
-
-if __name__ == "__main__":
-    data = fetch_today_starters()
-    for team, info in data.items():
-        print(f"・{team}: {info['name']} ({'右' if info['throws'] == 'R' else '左'}投 / 防御率 {info['era']})")
+        print(f"⚠️ 解析エラー ({e}): バックアップデータを採用します。")
+        return starters

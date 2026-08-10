@@ -1,13 +1,11 @@
 """
-NPB分析・予測スコア算出エンジン (全12球団対応 & ホームアドバンテージ考慮版)
+NPB分析・予測スコア算出エンジン (日付選択対応版)
 """
 
 from scraper import fetch_today_starters
 
 LEAGUE_AVG_ERA = 3.30
 LEAGUE_AVG_OPS = 0.700
-
-# ホームアドバンテージ（ホームチームの期待得点を1.03倍＝約3%上方修正）
 HOME_ADVANTAGE = 1.03
 
 TEAM_DATA = {
@@ -27,25 +25,24 @@ TEAM_DATA = {
     "埼玉西武ライオンズ": {"rpg": 3.1, "ops_vs_right": 0.640, "ops_vs_left": 0.630, "park_factor": 0.92, "bullpen_era": 3.30, "bullpen_fatigue": 1.10},
 }
 
-TODAY_STARTERS = fetch_today_starters()
-
-def calculate_expected_score(home_team: str, away_team: str) -> tuple[float, float, dict]:
+def calculate_expected_score(home_team: str, away_team: str, target_date_str: str = None) -> tuple[float, float, dict]:
     home_info = TEAM_DATA.get(home_team, TEAM_DATA["阪神タイガース"])
     away_info = TEAM_DATA.get(away_team, TEAM_DATA["読売ジャイアンツ"])
     
+    starters = fetch_today_starters(target_date_str)
+    
     default_pitcher = {"name": "未定", "era": 3.30, "whip": 1.25, "throws": "R"}
-    home_starter = TODAY_STARTERS.get(home_team, default_pitcher)
-    away_starter = TODAY_STARTERS.get(away_team, default_pitcher)
+    home_starter = starters.get(home_team, default_pitcher)
+    away_starter = starters.get(away_team, default_pitcher)
     
     park_factor = home_info["park_factor"]
 
     home_offense_ops = home_info["ops_vs_left"] if away_starter["throws"] == "L" else home_info["ops_vs_right"]
-    away_offense_ops = away_info["ops_vs_left"] if home_starter["throws"] == "L" else away_info["ops_vs_right"]
+    away_offense_ops = away_info["ops_vs_left"] if home_starter["throws"] == "L" else home_info["ops_vs_right"]
 
     home_pitching_era = (home_starter["era"] * 0.6) + (home_info["bullpen_era"] * home_info["bullpen_fatigue"] * 0.4)
     away_pitching_era = (away_starter["era"] * 0.6) + (away_info["bullpen_era"] * away_info["bullpen_fatigue"] * 0.4)
 
-    # ホームアドバンテージを乗算
     home_exp = home_info["rpg"] * (home_offense_ops / LEAGUE_AVG_OPS) * (away_pitching_era / LEAGUE_AVG_ERA) * park_factor * HOME_ADVANTAGE
     away_exp = away_info["rpg"] * (away_offense_ops / LEAGUE_AVG_OPS) * (home_pitching_era / LEAGUE_AVG_ERA) * park_factor
 
