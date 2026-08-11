@@ -64,38 +64,39 @@ def fetch_all():
         
         try:
             res = requests.get(url, headers=HEADERS, timeout=10)
-            print(f"Date: {date_str} | Status: {res.status_code} | Response Size: {len(res.text)}")
-            
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
                 
-                # HTML内のカード・行要素を広範囲に取得
-                cards = soup.find_all(["section", "div", "li", "tr"])
-                for card in cards:
-                    text = card.get_text(separator=" ", strip=True)
+                # 各試合カードブロックごとに処理
+                match_blocks = soup.select(".bb-matchTable__item, section.bb-scoreTable, .bb-headToHeadTable")
+                for block in match_blocks:
+                    # ブロック内のチーム名を抽出（順番保持）
+                    team_elements = block.select(".bb-matchTable__team, .bb-headToHeadTable__team, a")
+                    block_teams = []
+                    for el in team_elements:
+                        t_text = el.get_text(strip=True)
+                        for short, full in TEAM_ALIAS.items():
+                            if short in t_text and full not in block_teams:
+                                block_teams.append(full)
                     
-                    # チーム名の検出
-                    matched_teams = []
-                    for short, full in TEAM_ALIAS.items():
-                        if short in text and full not in matched_teams:
-                            matched_teams.append(full)
-                    
-                    # 2チーム検出されたら試合カードとして登録
-                    if len(matched_teams) == 2:
-                        game_pair = (matched_teams[0], matched_teams[1])
+                    # ちょうど2チーム（対戦カード）が判定できた場合のみ登録
+                    if len(block_teams) == 2:
+                        game_pair = (block_teams[0], block_teams[1])
                         if game_pair not in games:
                             games.append(game_pair)
                     
-                    # 予告先発・先発投手の抽出
-                    match = re.search(r"(?:予告先発|先発|投手)[：:\s]*([一-龥ぁ-んァ-ヶa-zA-Z\s]{2,8})", text)
-                    if match:
-                        pitcher_name = match.group(1).strip()
-                        for full in matched_teams:
-                            if full not in starters and len(pitcher_name) >= 2:
-                                starters[full] = {"name": pitcher_name}
+                    # 予告先発投手の抽出（「予告先発：〇〇」または「先発：〇〇」）
+                    block_text = block.get_text()
+                    pitcher_matches = re.findall(r"(?:予告先発|先発|投手)[：:\s]*([一-龥ぁ-んァ-ヶa-zA-Z]{2,8})", block_text)
+                    for p_name in pitcher_matches:
+                        # チーム名（例: 阪神、巨人）を投手名として誤検知するのを排除
+                        if p_name not in TEAM_ALIAS and p_name not in ["予告先発", "先発", "投手", "未定"]:
+                            for full in block_teams:
+                                if full not in starters:
+                                    starters[full] = {"name": p_name}
 
             schedule_db[date_str] = {"games": games, "starters": starters}
-            print(f" -> Result for {date_str}: {len(games)} games, {len(starters)} starters found.")
+            print(f"Result {date_str}: {len(games)} games, {len(starters)} starters.")
             time.sleep(1)
         except Exception as e:
             print(f"Error fetching schedule for {date_str}: {e}")
