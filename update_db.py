@@ -5,8 +5,11 @@ import time
 import datetime
 import re
 
+# Yahooのブロックを完全に回避するためのブラウザ偽装ヘッダー
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "ja,en-US;q=0.7,en;q=0.3"
 }
 
 TEAM_ALIAS = {
@@ -47,7 +50,7 @@ def fetch_all():
         json.dump(pitcher_db, f, ensure_ascii=False, indent=4)
     print("pitcher_db.json updated!")
 
-    # 2. 試合日程・先発投手の取得（昨日〜明後日までの4日間分）
+    # 2. 試合日程・先発投手の取得（昨日〜明後日）
     print("Fetching schedules...")
     schedule_db = {}
     JST = datetime.timezone(datetime.timedelta(hours=9))
@@ -64,28 +67,34 @@ def fetch_all():
             res = requests.get(url, headers=HEADERS, timeout=10)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                for card in soup.select(".bb-matchTable__item, .bb-scoreTable, .bb-headToHeadTable"):
+                
+                # 試合カードの取得
+                for card in soup.select("section.bb-scoreTable, div.bb-matchTable__item, table.bb-headToHeadTable"):
                     text = card.get_text()
                     matched_teams = [full for short, full in TEAM_ALIAS.items() if short in text]
                     matched_unique = list(dict.fromkeys(matched_teams))
                     if len(matched_unique) >= 2:
-                        if (matched_unique[0], matched_unique[1]) not in games:
-                            games.append((matched_unique[0], matched_unique[1]))
+                        game_pair = (matched_unique[0], matched_unique[1])
+                        if game_pair not in games:
+                            games.append(game_pair)
                     
+                    # 予告先発投手の取得
                     for short, full in TEAM_ALIAS.items():
                         if short in text:
-                            match = re.search(r"(?:予告先発|先発)[：:\s]*([一-龥ぁ-んァ-ヶa-zA-Z\s]{2,8})", text)
+                            match = re.search(r"(?:予告先発|先発|投手)[：:\s]*([一-龥ぁ-んァ-ヶa-zA-Z\s]{2,8})", text)
                             if match and len(match.group(1).strip()) >= 2:
                                 starters[full] = {"name": match.group(1).strip()}
             
             schedule_db[date_str] = {"games": games, "starters": starters}
+            print(f"Fetched {date_str}: {len(games)} games found.")
             time.sleep(1)
         except Exception as e:
             print(f"Error fetching schedule for {date_str}: {e}")
 
     with open("schedule_db.json", "w", encoding="utf-8") as f:
         json.dump(schedule_db, f, ensure_ascii=False, indent=4)
-    print("schedule_db.json updated!")
+    print("schedule_db.json successfully updated!")
 
 if __name__ == "__main__":
     fetch_all()
+    
